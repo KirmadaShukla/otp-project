@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Otp = require("../models/Otp");
 const user = require("../models/user");
+const jwt = require("jsonwebtoken");
 
 const twilio = require("twilio");
 const client = twilio(
@@ -33,7 +34,7 @@ exports.sendOTP = async (req, res) => {
 };
 
 exports.verifyOTP = async (req, res) => {
-  const { phone_no, otp, username, email } = req.body;
+  const { phone_no, otp } = req.body;
 
   if (!phone_no || !otp) {
     return res.status(400).json({ error: "Phone number and OTP are required" });
@@ -44,45 +45,78 @@ exports.verifyOTP = async (req, res) => {
     return res.status(400).json({ error: "Invalid or expired OTP" });
   }
 
-  await Otp.deleteOne({ _id: validOtp._id });
+  const existingUser = await user.findOne({ phone_no });
 
-  let existingUser = await user.findOne({ phone_no });
+  if (existingUser) {
+    // User exists, log them in
+    const payload = {
+      userId: existingUser._id,
+      phone_no: existingUser.phone_no,
+    };
 
-  if (!existingUser) {
-    if (!username) {
-      return res
-        .status(400)
-        .json({ error: "Username is required for registration" });
-    }
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn: "1d",
+    });
 
-    // Register new user
-    existingUser = await user.create({
-      phone_no,
-      username,
-      email: email || "",
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 24 * 60 * 60 * 1000,
+    });
+
+    // Unset the OTP field after successful login
+    await Otp.updateOne({ _id: validOtp._id }, { $unset: { otp: 1 } });
+
+    return res.status(200).json({
+      message: "OTP verified successfully. User logged in.",
+      token,
+      user: existingUser,
+    });
+  } else {
+    // User does not exist, OTP is valid for registration
+    return res.status(200).json({
+      message: "OTP verified successfully. Please complete registration.",
     });
   }
+};
 
-  const payload = {
-    userId: existingUser._id,
-    phone_no: existingUser.phone_no,
-  };
+exports.register = async (req, res) => {
+  const { phone_no, username, email, otp } = req.body;
 
-  const token = jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: "1d",
+  if (!phone_no || !username || !otp) {
+    return res
+      .status(400)
+      .json({ error: "Phone number, username, and OTP are required" });
+  }
+
+  // Verify OTP
+  const validOtp = await Otp.findOne({ phone_no, otp });
+  if (!validOtp) {
+    return res.status(400).json({ error: "Invalid or expired OTP" });
+  }
+
+  // Check if user already exists
+  let existingUser = await user.findOne({ phone_no });
+  if (existingUser) {
+    return res
+      .status(400)
+      .json({ error: "User with this phone number already exists." });
+  }
+
+  // Register new user
+  const newUser = await user.create({
+    phone_no,
+    name: username,
+    email: email || "",
   });
 
-  res.cookie("token", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "Strict",
-    maxAge: 24 * 60 * 60 * 1000,
-  });
+  // Unset the OTP field after successful registration
+  await Otp.updateOne({ _id: validOtp._id }, { $unset: { otp: 1 } });
 
-  return res.status(200).json({
-    message: "OTP verified successfully",
-    token,
-    user: existingUser,
+  return res.status(201).json({
+    message: "User registered successfully. Please login.",
+    user: newUser,
   });
 };
 
@@ -95,6 +129,7 @@ exports.logout = async (req, res) => {
     });
     return res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
+    
     console.error("Logout error:", error);
     res.status(500).json({ error: "Failed to logout" });
   }
