@@ -1,0 +1,36 @@
+# Node modules
+node_modules/
+
+# Build output
+build/
+dist/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Editor folders
+.vscode/
+.idea/
+
+# Coverage reports
+coverage/
+
+# Dependency directories
+.pnp/
+.pnp.js
+
+# Parcel, Next.js, or Vite cache
+.cache/
+.next/
+out/
