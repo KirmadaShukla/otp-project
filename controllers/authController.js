@@ -33,53 +33,57 @@ exports.sendOTP = async (req, res) => {
 };
 
 exports.verifyOTP = async (req, res) => {
-  try {
-    const { phone_no, otp } = req.body;
+  const { phone_no, otp, username, email } = req.body;
 
-    if (!phone_no || !otp) {
+  if (!phone_no || !otp) {
+    return res.status(400).json({ error: "Phone number and OTP are required" });
+  }
+
+  const validOtp = await Otp.findOne({ phone_no, otp });
+  if (!validOtp) {
+    return res.status(400).json({ error: "Invalid or expired OTP" });
+  }
+
+  await Otp.deleteOne({ _id: validOtp._id });
+
+  let existingUser = await user.findOne({ phone_no });
+
+  if (!existingUser) {
+    if (!username) {
       return res
         .status(400)
-        .json({ error: "Phone number and OTP are required" });
+        .json({ error: "Username is required for registration" });
     }
 
-    const validOtp = await Otp.findOne({ phone_no, otp });
-    if (!validOtp) {
-      return res.status(400).json({ error: "Invalid or expired OTP" });
-    }
-
-    await Otp.deleteOne({ _id: validOtp._id });
-
-    // Check or create user
-    let existingUser = await user.findOne({ phone_no });
-    if (!existingUser) {
-      existingUser = await user.create({ phone_no });
-    }
-
-    // Create JWT
-    const payload = {
-      userId: existingUser._id,
-      phone_no: existingUser.phone_no,
-    };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: "1d",
+    // Register new user
+    existingUser = await user.create({
+      phone_no,
+      username,
+      email: email || "",
     });
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 24 * 60 * 60 * 1000,
-    });
-
-    return res.status(200).json({
-      message: "OTP verified successfully",
-      token,
-      user: existingUser,
-    });
-  } catch (error) {
-    console.error("OTP verification error:", error);
-    return res.status(500).json({ error: "Failed to verify OTP" });
   }
+
+  const payload = {
+    userId: existingUser._id,
+    phone_no: existingUser.phone_no,
+  };
+
+  const token = jwt.sign(payload, process.env.JWT_SECRET, {
+    expiresIn: "1d",
+  });
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "Strict",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+
+  return res.status(200).json({
+    message: "OTP verified successfully",
+    token,
+    user: existingUser,
+  });
 };
 
 exports.logout = async (req, res) => {
